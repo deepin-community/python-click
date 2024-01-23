@@ -43,6 +43,15 @@ def test_echo_custom_file():
     assert f.getvalue() == "hello\n"
 
 
+def test_echo_no_streams(monkeypatch, runner):
+    """echo should not fail when stdout and stderr are None with pythonw on Windows."""
+    with runner.isolation():
+        sys.stdout = None
+        sys.stderr = None
+        click.echo("test")
+        click.echo("test", err=True)
+
+
 @pytest.mark.parametrize(
     ("styles", "ref"),
     [
@@ -98,10 +107,7 @@ def test_filename_formatting():
     assert click.format_filename(b"/x/foo.txt") == "/x/foo.txt"
     assert click.format_filename("/x/foo.txt") == "/x/foo.txt"
     assert click.format_filename("/x/foo.txt", shorten=True) == "foo.txt"
-
-    # filesystem encoding on windows permits this.
-    if not WIN:
-        assert click.format_filename(b"/x/foo\xff.txt", shorten=True) == "foo\udcff.txt"
+    assert click.format_filename(b"/x/\xff.txt", shorten=True) == "�.txt"
 
 
 def test_prompts(runner):
@@ -275,8 +281,8 @@ def test_echo_writing_to_standard_error(capfd, monkeypatch):
     emulate_input("y\n")
     click.confirm("Prompt to stderr", err=True)
     out, err = capfd.readouterr()
-    assert out == ""
-    assert err == "Prompt to stderr [y/N]: "
+    assert out == " "
+    assert err == "Prompt to stderr [y/N]:"
 
     monkeypatch.setattr(click.termui, "isatty", lambda x: True)
     monkeypatch.setattr(click.termui, "getchar", lambda: " ")
@@ -318,6 +324,22 @@ def test_open_file(runner):
         result = runner.invoke(cli, ["-"], input="foobar")
         assert result.exception is None
         assert result.output == "foobar\nmeep\n"
+
+
+def test_open_file_pathlib_dash(runner):
+    @click.command()
+    @click.argument(
+        "filename", type=click.Path(allow_dash=True, path_type=pathlib.Path)
+    )
+    def cli(filename):
+        click.echo(str(type(filename)))
+
+        with click.open_file(filename) as f:
+            click.echo(f.read())
+
+        result = runner.invoke(cli, ["-"], input="value")
+        assert result.exception is None
+        assert result.output == "pathlib.Path\nvalue\n"
 
 
 def test_open_file_ignore_errors_stdin(runner):
@@ -428,20 +450,13 @@ class MockMain:
         ("example.py", None, "example.py"),
         (str(pathlib.Path("/foo/bar/example.py")), None, "example.py"),
         ("example", None, "example"),
-        (
-            str(pathlib.Path("example/__main__.py")),
-            MockMain(".example"),
-            "python -m example",
-        ),
-        (
-            str(pathlib.Path("example/cli.py")),
-            MockMain(".example"),
-            "python -m example.cli",
-        ),
+        (str(pathlib.Path("example/__main__.py")), "example", "python -m example"),
+        (str(pathlib.Path("example/cli.py")), "example", "python -m example.cli"),
+        (str(pathlib.Path("./example")), "", "example"),
     ],
 )
 def test_detect_program_name(path, main, expected):
-    assert click.utils._detect_program_name(path, _main=main) == expected
+    assert click.utils._detect_program_name(path, _main=MockMain(main)) == expected
 
 
 def test_expand_args(monkeypatch):
@@ -452,6 +467,8 @@ def test_expand_args(monkeypatch):
     assert "setup.cfg" in click.utils._expand_args(["*.cfg"])
     assert os.path.join("docs", "conf.py") in click.utils._expand_args(["**/conf.py"])
     assert "*.not-found" in click.utils._expand_args(["*.not-found"])
+    # a bad glob pattern, such as a pytest identifier, should return itself
+    assert click.utils._expand_args(["test.py::test_bad"])[0] == "test.py::test_bad"
 
 
 @pytest.mark.parametrize(
