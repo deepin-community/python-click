@@ -1,6 +1,11 @@
 python-click (8.1.6-1deepin1) unstable; urgency=medium
 
+  [ deepin-ci-robot ]
   * fix(cve): CVE-2026-7246
+
+  [ lichenggang ]
+  * fix: add missing tempfile import in _termui_impl.py to resolve
+    NameError in _tempfilepager
 
  -- deepin-ci-robot <packages@deepin.org>  Tue, 21 Jul 2026 18:59:13 +0800
 
